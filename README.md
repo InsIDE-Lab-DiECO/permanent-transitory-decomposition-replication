@@ -2,9 +2,6 @@
 ## Replication package for "Permanent-Transitory decomposition of cointegrated time series via Dynamic Factor Models" (The Econometrics Journal, 2022).
 
 
-Article: "Permanent-Transitory decomposition of cointegrated time series via Dynamic Factor Models, with an application to commodity prices" Authors: Chiara Casoli and Riccardo (Jack) Lucchetti
-Overview
-
 This repository contains the material to replicate the Monte Carlo experiments and the empirical application described in the article. All scripts are written in gretl and require version 2021a or later.
 Directory Structure
 
