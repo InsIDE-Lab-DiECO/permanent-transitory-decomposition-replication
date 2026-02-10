@@ -74,15 +74,15 @@ Section 4: Commodities
 
     Table 3: Run part1.inp.
 
-## DOI
-
-This replication package is archived at Zenodo:
-
-[10.5281/zenodo.18592832](https://doi.org/10.5281/zenodo.18592832)
-
 
     Kasa Decomposition: Run part2.inp.
 
         Note: Set TO_DISPLAY = 1 on line 5 to see graphs on screen; otherwise, they are saved as EPS files.
 
     Robustness Check: Run part3.inp to generate comparison plots between EM and PC techniques.
+
+## DOI
+
+This replication package is archived at Zenodo:
+
+[10.5281/zenodo.18592832](https://doi.org/10.5281/zenodo.18592832)
