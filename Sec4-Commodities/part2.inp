@@ -1,0 +1,100 @@
+include part1.inp
+include DFM.gfn
+include staticfactor.gfn
+
+scalar TO_DISPLAY = 0         # 0: save as eps, 1: plot on screen 
+
+scalar n = nelem(y)
+scalar zn = cols(beta)
+scalar mn = cols(betaort)
+
+# generating z and m series
+
+list z = null
+loop i = 1.. zn  --quiet
+    series z_$i = lincomb(y, beta[,i])
+    z+= z_$i
+endloop
+
+list m = null
+loop i = 1.. mn  --quiet
+    series m_$i = lincomb(y, betaort[,i])
+    m+= m_$i
+endloop
+
+list d_m = diff(m)
+list X = z d_m
+
+# estimation of DFM
+
+bundle stat = staticfactor(X, , 1)
+scalar stat_fac = maxr(stat.numfac) # number of static factors
+
+varfac = 2
+
+qcrit = DFM_BNCrit(X, stat_fac, varfac, 1) # number of dynamic factors
+scalar optimal_q = maxr(qcrit) # BaiNg 2007 criteria
+
+q = 2 #3
+s = 0 # lags of factors in obs. eq.
+p = 2 # var order for factors
+
+
+Mod = DFM_Setup(X, q, s, p, 5000, 1.0e-6, 1)
+
+DFM_Estimate(&Mod, 3)
+DFM_Printout(&Mod, 2)
+
+F = DFM_GetFactors(&Mod)
+F -= TS* PC*
+
+# zhat and mhat
+
+list zhat = null
+loop foreach i z
+    ols $i const F --quiet
+    $i_hat = $yhat
+    list zhat += $i_hat
+endloop
+
+list hat_cum = null
+list dm_hat = null
+loop foreach i d_m
+    ols $i const F --quiet
+    $i_hat = $yhat
+    $i_hat[1] = m[i][1]
+    $i_hat_cum = cum($i_hat)
+    list dm_hat += $i_hat
+    list hat_cum += $i_hat_cum
+endloop
+
+# P-T decomposition
+
+list hat = zhat hat_cum
+matrix binv = inv(beta ~ betaort)
+list Trans = null
+list Perm = null
+list Idio = null
+
+k = 1
+loop foreach i y
+    series $i_trans = lincomb(zhat, binv[1:zn, k])
+    tmp = mean($i_trans)
+    $i_trans -= tmp
+    Trans += $i_trans
+    series $i_perm = lincomb(hat_cum, binv[zn+1:, k]) + tmp
+    Perm += $i_perm
+    series $i_common = $i_trans + $i_perm
+    series $i_idio = $i - $i_common
+    Idio += $i_idio
+    k++
+endloop
+
+### generating the plots
+
+loop foreach i y --quiet
+    fname = TO_DISPLAY ? "display" : "$i_perm.eps"
+    gnuplot $i $i_perm --output=@fname --time-series --with-lines --single-yaxis
+    fname = TO_DISPLAY ? "display" : "$i_panes.eps"
+    scatters $i $i_perm $i_trans $i_idio --output=@fname
+endloop

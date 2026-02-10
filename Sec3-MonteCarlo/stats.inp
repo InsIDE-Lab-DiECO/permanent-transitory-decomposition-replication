@@ -1,0 +1,28 @@
+open n032_r2_b4_T200.gdt
+
+PRINT_FULL = 0 # switch to 1 to print Online Appendix Tables (full results)
+
+pos = difTr > 0
+list C = q phi difTr pos
+M = aggregate(C, id, mean)
+M = M ~ aggregate(difTr, id, sd)[,3]
+M = M ~ aggregate(difTr, id, median)[,3]
+
+if PRINT_FULL 
+    ttest = ( M[,5] ./ M[,7] ) .* sqrt(M[,2])
+    pval = 1 - cdf(z, ttest)
+    M = M ~ ttest ~ pval
+
+    head = defarray("prog", "Nrep", "q", "phi", "mean diff", "pos share",
+      "sd diff", "median diff", "equality test", "pvalue")
+  
+    cnameset(M, head)
+    print M
+else
+    M = M[, {3,4,6}]'
+    lab = defarray("q", "phi", "pos share")
+    rnameset(M, lab)
+    print M
+endif
+
+    

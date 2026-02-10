@@ -1,0 +1,131 @@
+set verbose off
+
+function matrix cointbeta(matrix *b, list X, list EXO,
+                          scalar maxlag, scalar crit, scalar coint_alpha)
+
+    # crit: 1 = AIC, 2 = BIC, 3 = HQC
+
+    var maxlag X ; EXO --lagselect --silent
+    if $version > 20230
+        # ensure compatibility with previous versions
+        crit +=3
+    endif
+
+    scalar p = iminc($test)[crit]
+    johansen p X ; EXO --silent #Cointegration testing
+    crank = sumc($pvalue[,1] .< coint_alpha)
+    if crank > 0
+        #set vecm_norm none
+        vecm p crank X ; EXO --silent
+        b = diagcat(b, $jbeta)
+    else
+        b = b | zeros(nelem(X), cols(b))
+    endif
+    return {p, crank}
+end function
+
+###########################################################################
+
+open commod_data.gdt --quiet
+#open commod_data.csv
+
+scalar maxlag = 6
+scalar crit = 3 # criterion for choosing lag length (1 = AIC, 2 = BIC, 3 = HQ)
+scalar coint_alpha = 0.01 # significance level for cointegration test
+
+list P = aluminum barley beef coal cocoa coffee rapeseed_oil copper \
+  cotton hides lamb lead soft_logs hard_logs maize nickel \
+  oil_brent oil_DF oil_WTI olive_oil swine poultry rice rubber fish \
+  hard_sawnwood soft_sawnwood shrimp sunflower_oil tea tin uranium wheat \
+  wool zinc gold silver platinum
+
+list l_P = log(P)
+list EXO = null #exogenous variables
+
+#--------------------------------------------------------------------------
+#                              Estimate beta
+#--------------------------------------------------------------------------
+
+matrix beta = {}
+scalar totrank = 0
+scalar tottrends = 0
+
+# blocks of commodities
+printf "\n                    VAR length   c.rank  #trends\n\n"
+string fmt = "%20s: %8d %8d %8d"
+#----------------------------------METALS----------------------------------
+
+list base_metals = l_aluminum l_copper l_lead l_nickel l_tin l_zinc
+aaa = cointbeta(&beta, base_metals, EXO, maxlag, crit, coint_alpha)
+desc = "Base Metals"
+nr = aaa[2]
+nt = nelem(base_metals) - aaa[2]
+totrank += nr
+tottrends += nt
+printf "@fmt\n", desc, aaa[1], nr, nt
+
+#-------------------------------PRECIOUS METALS----------------------------
+list prec_metals = l_gold l_silver l_platinum #l_uranium
+aaa = cointbeta(&beta, prec_metals, EXO, maxlag, crit, coint_alpha)
+desc = "Precious Metals"
+nr = aaa[2]
+nt = nelem(prec_metals) - aaa[2]
+totrank += nr
+tottrends += nt
+printf "@fmt\n", desc, aaa[1], nr, nt
+
+#---------------------------------ENERGY-----------------------------------
+list energy = l_oil_brent l_oil_DF l_oil_WTI l_coal #l_uranium
+aaa = cointbeta(&beta, energy, EXO, maxlag, crit, coint_alpha)
+desc = "Energy"
+nr = aaa[2]
+nt = nelem(energy) - aaa[2]
+totrank += nr
+tottrends += nt
+printf "@fmt\n", desc, aaa[1], nr, nt
+
+#-------------------------------LIVESTOCK----------------------------------
+list livestock = l_beef l_fish l_swine l_poultry l_lamb l_shrimp
+aaa = cointbeta(&beta, livestock, EXO, maxlag, crit, coint_alpha)
+desc = "Livestock"
+nr = aaa[2]
+nt = nelem(livestock) - aaa[2]
+totrank += nr
+tottrends += nt
+printf "@fmt\n", desc, aaa[1], nr, nt
+
+#--------------------------------RAWMAT------------------------------------
+list rawmat = l_soft_logs l_cotton l_hides l_hard_logs l_rubber \
+  l_hard_sawnwood l_soft_sawnwood l_wool
+aaa = cointbeta(&beta, rawmat, EXO, maxlag, crit, coint_alpha)
+desc = "Raw Materials"
+nr = aaa[2]
+nt = nelem(rawmat) - aaa[2]
+totrank += nr
+tottrends += nt
+printf "@fmt\n", desc, aaa[1], nr, nt
+
+#---------------------------------FOOD-------------------------------------
+list food = l_barley l_cocoa l_coffee l_rapeseed_oil l_maize \
+  l_olive_oil l_rice l_sunflower_oil l_tea l_wheat #l_peanuts
+aaa = cointbeta(&beta, food, EXO, maxlag, crit, coint_alpha)
+desc = "Food"
+nr = aaa[2]
+nt = nelem(food) - aaa[2]
+totrank += nr
+tottrends += nt
+printf "@fmt\n", desc, aaa[1], nr, nt
+
+#--------------------------------------------------------------------------
+printf "\n%20s%19d%9d\n", "TOTAL:", totrank, tottrends
+
+list y = base_metals prec_metals energy livestock rawmat food
+strings lab = varnames(y)
+
+matrix Y = {y}
+matrix Z = Y*beta
+
+betaort = nullspace(beta')
+
+rnameset(beta, lab)
+rnameset(betaort, lab)

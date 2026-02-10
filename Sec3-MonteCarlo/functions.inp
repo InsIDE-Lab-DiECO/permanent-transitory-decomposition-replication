@@ -1,0 +1,152 @@
+function matrix genbeta(const matrix blocks)
+    # randomly generate a cointegration matrix
+    matrix ret = {}
+    nb = cols(blocks)
+    loop i = 1 .. nb
+        ni = blocks[1,i]
+        ri = blocks[2,i]
+        matrix b = I(ri) | mnormal(ni-ri, ri)
+        ret = diagcat(ret, b)
+    endloop
+    return ret
+end function
+
+function matrix genA(const matrix beta)
+    # generate the VAR matrix given beta
+    scalar n = rows(beta)
+    scalar r = cols(beta)
+    matrix alpha = mnormal(n, r)
+    matrix V
+    A = I(n) + alpha * beta'
+    gamma = eigen(A, &V)
+    iV = inv(V)
+
+    loop i = 1 .. n
+	# eliminate explosive roots
+        if abs(gamma[i]) > 1
+            gamma[i] = 1 ./ gamma[i]
+        endif
+    endloop
+
+    ret = (V .* transp(gamma)) * iV
+    return Re(ret)
+end function
+
+function matrix genE(scalar T, scalar n, scalar q,
+                     scalar phi, scalar snoise, matrix *f)
+    # generate VAR innovations with a factor structure
+    matrix f = filter(mnormal(T, q), 1, phi)
+    matrix Lambda = muniform(q, n)
+    return f * Lambda + mnormal(T,n) * snoise
+end function
+
+function scalar tracestat(list F, list Fh)
+    # Trace statistic function
+    list ALL = F || Fh
+    smpl ALL --no-missing
+    mF = {F}
+    mFh = {Fh}
+    FtFh = mF'mFh
+    FtF = mF'mF
+    return tr( qform(FtFh, invpd(mFh'mFh)) ) / tr(FtF)
+end function
+
+function void save_results(const matrix sim, const matrix blocks, scalar T)
+    # save Monte Carlo results into an appropriately-named file
+
+    scalar cointrank = blocks[2,1]
+    scalar nblocks = cols(blocks)
+    scalar n = sumr(blocks[1,])
+
+    matrix X = sim ~ (sim[,4] - sim[,5])
+    cnames = defarray("id", "q", "phi", "trCoint", "trDif", "difTr")
+    cnameset(X, cnames)
+    string fname = sprintf("n%03d_r%d_b%d_T%d", n, cointrank, nblocks, T)
+    store "@fname.gdt" --matrix=X
+end function
+
+
+function matrix estimate_beta(list B, scalar maxlag, scalar rk,
+                              int verbose[0::0])
+
+    # estimate cointegration matrix, given the rank
+    n = nelem(B)
+    var maxlag B --lagselect --silent
+    
+    if $version < 20231
+        scalar ord = iminc($test)[3]
+    else
+        scalar ord = iminc($test)[6]
+    endif
+    
+    if rk == -1
+        # estimate the rank too
+        if verbose == 0
+            johansen ord B --silent
+        elif verbose == 1
+            johansen ord B --quiet
+        elif verbose == 2
+            johansen ord B
+        endif
+
+        r = sumc($pvalue[,1] .< 0.01)
+        if verbose
+            print "-----------------------------------"
+            printf "r (estimated) = %d\n", r
+            print "-----------------------------------"
+        endif
+    else
+        r = rk
+        if verbose
+            print "-----------------------------------"
+            printf "r (fixed) = %d\n", r
+            print "-----------------------------------"
+        endif
+    endif
+
+
+    if r == 0
+        matrix beta = {}
+    elif r == n
+        matrix beta = I(n)
+    else
+        matrix beta = {}
+        catch vecm ord r B --silent
+        if $error
+            matrix orig = seq(1, n)
+            scalar chk = 0
+            matrix mB = B
+            # this may be due to numerical singularity of the upper
+            # block of beta; try reshuffling the columns
+            if verbose
+                printf "Reshuffle!\n"
+            endif
+            
+            scalar nresh = 0
+            loop while !chk
+                reshuffled = randperm(nelem(orig)) #randperm(orig)
+                if maxr(orig - reshuffled) > 0
+                    # make sure the new order is different from the original
+                    matrix corresp = orig .= reshuffled'
+                    if verbose > 1
+                        print orig reshuffled corresp
+                    endif
+                    list B2 = mB[reshuffled]
+                    catch vecm ord r B2 --silent
+                    chk = $error
+                    if !chk
+                        beta = corresp' $jbeta
+                    endif
+                endif
+                nresh++
+            endloop
+            printf "%d reshuffles\n", nresh
+
+        else
+            beta = $jbeta
+        endif
+    endif
+
+    return beta
+end function
+

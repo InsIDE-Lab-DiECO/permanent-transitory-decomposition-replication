@@ -1,0 +1,148 @@
+# COMPARISON BETWEEN PC AND EM BASED P-T DECOMPOSITION
+include part1.inp
+include DFM.gfn
+include staticfactor.gfn
+
+
+scalar n = nelem(y)
+scalar zn = cols(beta)
+scalar mn = cols(betaort)
+
+# generating z and m series
+
+list z = null
+loop i = 1.. zn  --quiet
+    series z_$i = lincomb(y, beta[,i])
+    z+= z_$i
+endloop
+
+list m = null
+loop i = 1.. mn  --quiet
+    series m_$i = lincomb(y, betaort[,i])
+    m+= m_$i
+endloop
+
+list d_m = diff(m)
+list X = z d_m
+
+# DFM
+
+# number of static factors
+bundle stat = staticfactor(X, , 1)
+scalar stat_fac = maxr(stat.numfac)
+
+# number of dynamic factors
+varfac = 2
+
+qcrit = DFM_BNCrit(X, stat_fac, varfac, 1)
+scalar optimal_q = maxr(qcrit) # BaiNg 2007 criteria
+
+q = 2
+s = 0 # lags of factors in obs. eq.
+p = 2 # var order for factors
+
+# estimation of DFM
+
+# 1: estimation via PC
+Mod = DFM_Setup(X, q, s, p, 5000, 1.0e-6, 1)
+
+DFM_Estimate(&Mod, 1)
+DFM_Printout(&Mod, 2)
+
+F_pc = DFM_GetFactors(&Mod)
+
+# 2: estimation via EM
+Mod2 = DFM_Setup(X, q, s, p, 5000, 1.0e-6, 1)
+
+DFM_Estimate(&Mod2, 3)
+DFM_Printout(&Mod2, 2)
+
+F_em = DFM_GetFactors(&Mod2)
+F_em -= TS* PC*
+
+###
+
+list zhat_pc = null #pc
+loop foreach i z
+    ols $i const F_pc --quiet
+    $i_hatz_pc = $yhat
+    list zhat_pc += $i_hatz_pc
+endloop
+
+list hat_cum_pc = null #pc
+list dm_hat_pc = null
+loop foreach i d_m
+    ols $i const F_pc --quiet
+    $i_hatm_pc = $yhat
+    $i_hatm_pc[1] = m[i][1]
+    $i_hatm_cum_pc = cum($i_hatm_pc)
+    list dm_hat_pc += $i_hatm_pc
+    list hat_cum_pc += $i_hatm_cum_pc
+endloop
+
+list zhat_em = null #em
+loop foreach i z
+    ols $i const F_em --quiet
+    $i_hatz_em = $yhat
+    list zhat_em += $i_hatz_em
+endloop
+
+list hat_cum_em = null #em
+list dm_hat_em = null
+loop foreach i d_m
+    ols $i const F_em --quiet
+    $i_hatm_em = $yhat
+    $i_hatm_em[1] = m[i][1]
+    $i_hatm_cum_em = cum($i_hatm_em)
+    list dm_hat_em += $i_hatm_em
+    list hat_cum_em += $i_hatm_cum_em
+endloop
+
+# P-T decomposition: PC based
+
+list hat_pc = zhat_pc hat_cum_pc
+matrix binv = inv(beta ~ betaort)
+list Trans_pc = null
+list Perm_pc = null
+list Idio_pc = null
+
+k = 1
+loop foreach i y
+    series $i_trans_pc = lincomb(zhat_pc, binv[1:zn, k])
+    tmp = mean($i_trans_pc)
+    $i_trans_pc -= tmp
+    Trans_pc += $i_trans_pc
+    series $i_perm_pc = lincomb(hat_cum_pc, binv[zn+1:, k]) + tmp
+    Perm_pc += $i_perm_pc
+    series $i_common_pc = $i_trans_pc + $i_perm_pc
+    series $i_idio_pc = $i - $i_common_pc
+    Idio_pc += $i_idio_pc
+    k++
+endloop
+
+# P-T decomposition: EM based
+
+list hat_em = zhat_em hat_cum_em
+list Trans_em = null
+list Perm_em = null
+list Idio_em = null
+
+k = 1
+loop foreach i y
+    series $i_trans_em = lincomb(zhat_em, binv[1:zn, k])
+    tmp = mean($i_trans_em)
+    $i_trans_em -= tmp
+    Trans_em += $i_trans_em
+    series $i_perm_em = lincomb(hat_cum_em, binv[zn+1:, k]) + tmp
+    Perm_em += $i_perm_em
+    series $i_common_em = $i_trans_em + $i_perm_em
+    series $i_idio_em = $i - $i_common_em
+    Idio_em += $i_idio_em
+    k++
+endloop
+
+### generate the plots
+
+loop foreach i y --quiet
+    gnuplot $i $i_perm_pc $i_perm_em --output=display --time-series --with-lines --single-yaxis
+endloop

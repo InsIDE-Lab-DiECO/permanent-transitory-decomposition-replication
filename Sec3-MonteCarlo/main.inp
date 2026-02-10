@@ -1,0 +1,176 @@
+set verbose off
+include functions.inp
+
+function matrix dimblock(scalar row)
+    if row == 1
+        matrix d = {8; 2}
+        scalar B = 4
+    elif row == 2
+        matrix d = {8; 4}
+        scalar B = 4
+    elif row == 3
+        matrix d = {16; 2}
+        scalar B = 4
+    elif row == 4
+        matrix d = {16; 4}
+        scalar B = 4
+    elif row == 5
+        matrix d = {8; 2}
+        scalar B = 8
+    elif row == 6
+        matrix d = {8; 4}
+        scalar B = 8
+    elif row == 7
+        matrix d = {16; 4}
+        scalar B = 8
+    endif
+    
+    return mshape(d, 2, B)
+end function
+
+# packages
+include DFM.gfn
+include extra.gfn
+
+##### --- simulation set up -----------------------------------------------------------
+
+set seed 123
+
+##### === EDIT HERE FOR REPLICATION ========================================================================================
+nulldata 200                           # change this to adjust sample size (odd- or even-numbered rows of Tables 1 and 2)
+ESTIMATE_R = 0                         # 0: use true rank (Table 1); 1 = estimate rank (Table 2)
+scalar n_rep = 400		          	   # no. of Monte Carlo replications
+matrix blocks = dimblock(1)            # the argument is the row number of tables 1 and 2; for example, 1 -> n=32, B=4, r=2
+##### ======================================================================================================================
+
+
+setobs 1 1 --special-time-series
+
+
+# 1st row: no. of variables per block      
+# 2nd row: cointegration rank inside block
+
+scalar nblocks = cols(blocks)	          # no. of blocks
+				           
+scalar method = 1                         # 1 = Principal Comonents
+scalar n = sumr(blocks[1,])               # number of variables of the system
+scalar r_total = sumr(blocks[2,])         # overall cointegration rank
+q = {1, 3, 5, 8}                          # number of factors
+phi = {0.1, 0.5, 0.9}                     # factor AR parameters
+
+scalar snoise = 0.1                       # sd of idiosyncratic component
+
+#### --- Monte Carlo loop -------------------------------------------------------------
+
+matrix results = {}
+id = 1
+
+loop ii = 1 .. nelem(q)
+    loop j = 1 .. nelem(phi)
+
+	print "-----------------------------------------"
+	printf "Experiment with factor %d, and phi = %f", q[ii], phi[j]
+
+        loop n_rep
+	    # generate the hidden factors
+            f = {}
+            E = genE($nobs, n, q[ii], phi[j], snoise, &f)  # defined in "functions.inp"
+            list F = mat2list(f, "truefac")                # from "extra.gfn"
+	    # generate the cointegration matrix and the VAR parameters
+            matrix beta = genbeta(blocks)                  # defined in "functions.inp"
+            matrix A = genA(beta)                          # defined in "functions.inp"
+            matrix sim = varsimul(A, E, zeros(1,n))
+	    # generate the observables
+            list Y = mat2list(sim[2:,], "observed")
+
+	    # estimate the cointegration parameters
+            matrix bhat = {}
+            fin = 0
+	    est_r = zeros(1, nblocks)
+            loop i = 1 .. nblocks
+                ini = fin+1
+                fin += blocks[1,i]
+                list BLOCK = Y[ini:fin]
+		if ESTIMATE_R
+		    scalar crank = -1 # conventional
+		else
+		    scalar crank = blocks[2, i]
+		endif
+		    
+		beta_i = estimate_beta(BLOCK, 4, crank)    # defined in "functions.inp"
+		if rows(beta_i) > 0 
+                    bhat = diagcat(bhat, beta_i)
+		    est_r[i] = cols(beta_i)
+                else
+                    bhat = bhat | zeros(nelem(BLOCK), cols(bhat))
+                endif
+            endloop
+
+	    # FIX for the case when the first est_r[] are zero
+	    pad = {}
+	    npad = 0
+	    loop i = 1 .. nblocks
+		if est_r[i] == 0
+		    npad += blocks[1,i]
+		else
+		    break
+		endif
+	    endloop
+	    bhat = zeros(npad, cols(bhat)) | bhat
+
+	    if minr(est_r) == 0
+		# shouldn't happen
+		print bhat
+	    endif
+	    
+	    # perform the cointegration-based stationarity transformation
+	    
+            matrix bort = nullspace(bhat')
+            matrix tmp = {Y} * bhat
+            list Z = mat2list(tmp, "ecm")
+	    if sumr(est_r) == n
+		list M = null
+	    else
+		matrix tmp2 = {Y} * bort
+		list M = diff(mat2list(tmp2, "complement"))
+	    endif
+	    
+            list COINT = Z M
+
+	    # estimate the cointegration-based dfm
+            bundle mod = DFM_Setup(COINT, q[$ii], 0, 1, , , ,0) #static!
+            err = DFM_Estimate(&mod, method)
+            DFM_Printout(&mod, 0)
+
+            list LC = DFM_GetFactors(&mod)
+	    if method == 2
+		LC -= TS*
+	    elif method == 3
+		LC -= TS* ML*
+	    endif
+	    
+            # list print LC
+            scalar trac1 = tracestat(F, LC) # defined in "functions.inp"
+
+	    # estimate the cointegration-based dfm
+            list DD = diff(Y)
+            bundle mod2 = DFM_Setup(DD, q[$ii], 0, 1, , , ,0)
+            err = DFM_Estimate(&mod2, method)
+            DFM_Printout(&mod2, 0)
+
+            list LD = DFM_GetFactors(&mod2)
+	    if method == 2
+		LD -= TS*
+	    elif method == 3
+		LD -= TS* ML*
+	    endif
+            scalar trac2 = tracestat(F, LD)
+
+            results |= (id ~ q[ii] ~ phi[j] ~ trac1 ~ trac2)
+        endloop # n_rep
+	id++
+    endloop # phi
+endloop # q
+
+save_results(results, blocks, $nobs)   # defined in "functions.inp"
+
